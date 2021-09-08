@@ -30,7 +30,7 @@ do
   convert "${f}" \
   \( -clone 0 -resize 1x1! -resize $size! -modulate 100,100,0 \) \
   \( -clone 0 -fill "gray(50%)" -colorize 100 \) \
-  -compose colorize -composite -quality "${JQUAL} "${jf}" || exit 3
+  -compose colorize -composite -quality "${JQUAL}" "${jf}" || exit 3
   Q="${JQUAL}" jpeg.sh "${jf}" || exit 4
   rm -f "${f}" "${jf}" || exit 5
 done
