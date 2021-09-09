@@ -460,12 +460,12 @@ func awbmov(fn string) (err error) {
 	// drop AAC and co_*.jpeg
 	var e error
 	if !gKeep {
-		frame = 1
 		_ = os.Remove(root + ".aac")
+		frame = 1
 		for {
 			ffn := fmt.Sprintf("co_%s_%06d.jpeg", root, frame)
 			exists, e = fileExists(ffn)
-			if e != nil && !exists {
+			if e != nil || !exists {
 				break
 			}
 			_ = os.Remove(ffn)
