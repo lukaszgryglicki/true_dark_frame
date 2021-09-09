@@ -50,3 +50,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+*.MOV
+*.png
+*.mp4
+*.aac
+/awbmov
