@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -267,6 +268,10 @@ func awbmov(fn string) (err error) {
 			}
 		}(ch)
 	}
+	ext := "png"
+	if gNoConvert {
+		ext = "jpeg"
+	}
 	go func(ch chan error) {
 		var (
 			res string
@@ -275,11 +280,7 @@ func awbmov(fn string) (err error) {
 		defer func() {
 			ch <- err
 		}()
-    ext := "png"
-    if gNoConvert {
-      ext = "jpeg"
-    }
-		// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.png"
+		// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.ext"
 		res, err = execCommand(
 			gDebug,
 			gOutput,
@@ -421,48 +422,50 @@ func awbmov(fn string) (err error) {
 			ch <- err
 		}()
 		// printf("processing frame: '%s'\n", fn)
-		var cmdAndArgs []string
-		if cwb {
-			// convert "${f}" -colorspace sRGB \( -clone 0 -fill "$color" -colorize 50% \) -compose colorize -composite -colorspace sRGB -quality "${IJQUAL}" "${jf}"
-			cmdAndArgs = []string{
-				"convert", fn, "-colorspace", "sRGB", "(", "-clone", "0", "-fill", wbColor, "-colorize", "50%", ")",
-				"-compose", "colorize", "-composite", "-colorspace", "sRGB", "-quality", qual,
+		if !gNoConvert {
+			var cmdAndArgs []string
+			if cwb {
+				// convert "${f}" -colorspace sRGB \( -clone 0 -fill "$color" -colorize 50% \) -compose colorize -composite -colorspace sRGB -quality "${IJQUAL}" "${jf}"
+				cmdAndArgs = []string{
+					"convert", fn, "-colorspace", "sRGB", "(", "-clone", "0", "-fill", wbColor, "-colorize", "50%", ")",
+					"-compose", "colorize", "-composite", "-colorspace", "sRGB", "-quality", qual,
+				}
+				if gNoJpeg {
+					// cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
+					cmdAndArgs = append(cmdAndArgs, "-normalize")
+				}
+				cmdAndArgs = append(cmdAndArgs, jfn)
+				res, err = execCommand(
+					gDebug,
+					gOutput,
+					cmdAndArgs,
+					nil,
+				)
+			} else {
+				// convert "${f}" \( -clone 0 -resize 1x1! -resize $size! -modulate 100,100,0 \) \( -clone 0 -fill "gray(50%)" -colorize 100 \) -compose colorize -composite -quality "${IJQUAL}" "${jf}"
+				cmdAndArgs = []string{
+					"convert", fn, "(", "-clone", "0", "-resize", "1x1!", "-resize", frameSize + "!", "-modulate", "100,100,0", ")",
+					"(", "-clone", "0", "-fill", "gray(50%)", "-colorize", "100", ")",
+					"-compose", "colorize", "-composite", "-quality", qual,
+				}
+				if gNoJpeg {
+					// cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
+					cmdAndArgs = append(cmdAndArgs, "-normalize")
+				}
+				cmdAndArgs = append(cmdAndArgs, jfn)
+				res, err = execCommand(
+					gDebug,
+					gOutput,
+					cmdAndArgs,
+					nil,
+				)
 			}
-			if gNoJpeg {
-				// cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
-				cmdAndArgs = append(cmdAndArgs, "-normalize")
+			if err != nil {
+				if res != "" {
+					printf("%s:\n%s\n", fn, res)
+				}
+				return
 			}
-			cmdAndArgs = append(cmdAndArgs, jfn)
-			res, err = execCommand(
-				gDebug,
-				gOutput,
-				cmdAndArgs,
-				nil,
-			)
-		} else {
-			// convert "${f}" \( -clone 0 -resize 1x1! -resize $size! -modulate 100,100,0 \) \( -clone 0 -fill "gray(50%)" -colorize 100 \) -compose colorize -composite -quality "${IJQUAL}" "${jf}"
-			cmdAndArgs = []string{
-				"convert", fn, "(", "-clone", "0", "-resize", "1x1!", "-resize", frameSize + "!", "-modulate", "100,100,0", ")",
-				"(", "-clone", "0", "-fill", "gray(50%)", "-colorize", "100", ")",
-				"-compose", "colorize", "-composite", "-quality", qual,
-			}
-			if gNoJpeg {
-				// cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
-				cmdAndArgs = append(cmdAndArgs, "-normalize")
-			}
-			cmdAndArgs = append(cmdAndArgs, jfn)
-			res, err = execCommand(
-				gDebug,
-				gOutput,
-				cmdAndArgs,
-				nil,
-			)
-		}
-		if err != nil {
-			if res != "" {
-				printf("%s:\n%s\n", fn, res)
-			}
-			return
 		}
 		if gNoJpeg {
 			return
@@ -478,7 +481,7 @@ func awbmov(fn string) (err error) {
 			printf("%s:\n%s\n", fn, res)
 		}
 	}
-	if gWBSrc != "" {
+	if gWBSrc != "" && !gNoConvert {
 		err = getWBColor()
 		if err != nil {
 			return
@@ -510,7 +513,7 @@ func awbmov(fn string) (err error) {
 	ch = make(chan error)
 	nThreads := 0
 	for {
-		ffn := fmt.Sprintf("%s_%06d.png", root, frame)
+		ffn := fmt.Sprintf("%s_%06d.%s", root, frame, ext)
 		exists, err = fileExists(ffn)
 		if err != nil {
 			return
