@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -16,12 +18,44 @@ import (
 // [OUTPUT=1]
 // [KEEP=1]
 // [VQ=1-31], default 20
+// [FPS=29.97], default autodetect
+// [N_CPUS=16], default autodetect
+// [IJQUAL=99], default 99
+// [JQUAL=90], default 90
 var (
+	gThrN   int
 	gDebug  int
 	gOutput bool
 	gKeep   bool
+	gFPS    string
 	gVQ     = "20"
+	gJqual  = "90"
+	gIJqual = "99"
 )
+
+func getThreadsNum() (thrN int) {
+	nCPUsStr := os.Getenv("N_CPUS")
+	nCPUs := 0
+	if nCPUsStr != "" {
+		var err error
+		nCPUs, err = strconv.Atoi(nCPUsStr)
+		if err != nil || nCPUs < 0 {
+			nCPUs = 0
+		}
+	}
+	if nCPUs > 0 {
+		n := runtime.NumCPU()
+		if nCPUs > n {
+			nCPUs = n
+		}
+		runtime.GOMAXPROCS(nCPUs)
+		thrN = nCPUs
+		return
+	}
+	thrN = runtime.NumCPU()
+	runtime.GOMAXPROCS(thrN)
+	return
+}
 
 func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]string) (string, error) {
 	// Execution time
@@ -154,14 +188,51 @@ func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]str
 
 func awbmov(fn string) (err error) {
 	fmt.Printf("processing '%s'\n", fn)
-	// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.png" || exit 1
-	// ffmpeg -i "$1" -vn -acodec aac -ac 2 -ar 48000 -f mp4 -y "${root}.aac" || exit 2
 	fnAry := strings.Split(fn, ".")
 	root := fn
 	if len(fnAry) > 1 {
 		root = strings.Join(fnAry[:len(fnAry)-1], ".")
 	}
 	ch := make(chan error)
+	autoDetect := false
+	if gFPS == "" {
+		autoDetect = true
+		go func(ch chan error) {
+			var (
+				res string
+				err error
+			)
+			defer func() {
+				ch <- err
+			}()
+			// result=`ffprobe -v error -select_streams v -of default=noprint_wrappers=1:nokey=1 -show_entries stream=r_frame_rate "${1}"`
+			// FPS=`echo "scale=3; ${result}" | bc`
+			res, err = execCommand(
+				gDebug,
+				true,
+				[]string{"ffprobe", "-v", "error", "-select_streams", "v", "-of", "default=noprint_wrappers=1:nokey=1", "-show_entries", "stream=r_frame_rate", fn},
+				nil,
+			)
+			if err != nil && res != "" {
+				fmt.Printf("%s:\n%s\n", fn, res)
+			}
+			if err == nil && res != "" {
+				var (
+					i1 int
+					i2 int
+					n  int
+				)
+				n, err = fmt.Sscanf(res, "%d/%d", &i1, &i2)
+				if err != nil {
+					return
+				}
+				if n == 2 && i1 > 0 && i2 > 0 {
+					fFPS := float64(i1) / float64(i2)
+					gFPS = fmt.Sprintf("%.3f", fFPS)
+				}
+			}
+		}(ch)
+	}
 	go func(ch chan error) {
 		var (
 			res string
@@ -170,6 +241,7 @@ func awbmov(fn string) (err error) {
 		defer func() {
 			ch <- err
 		}()
+		// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.png" || exit 1
 		res, err = execCommand(
 			gDebug,
 			gOutput,
@@ -188,6 +260,7 @@ func awbmov(fn string) (err error) {
 		defer func() {
 			ch <- err
 		}()
+		// ffmpeg -i "$1" -vn -acodec aac -ac 2 -ar 48000 -f mp4 -y "${root}.aac" || exit 2
 		res, err = execCommand(
 			gDebug,
 			gOutput,
@@ -206,6 +279,128 @@ func awbmov(fn string) (err error) {
 	if err != nil {
 		return
 	}
+	if autoDetect {
+		err = <-ch
+		if err != nil {
+			return
+		}
+	}
+	if gFPS == "" {
+		err = fmt.Errorf("no fps specified and autodetect failed, please specify fps via FPS=29.97")
+		return
+	}
+	fmt.Printf("using %s fps, %d threads\n", gFPS, gThrN)
+	fileExists := func(name string) (bool, error) {
+		// fmt.Printf("check '%s'\n", name)
+		_, err := os.Stat(name)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	var frameSize string
+	getFrameSize := func(fn string) error {
+		var res string
+		// size=`convert "$f" -format "%wx%h" info:`
+		res, err = execCommand(
+			gDebug,
+			true,
+			[]string{"convert", fn, "-format", "%wx%h", "info:"},
+			nil,
+		)
+		if err != nil {
+			if res != "" {
+				fmt.Printf("%s:\n%s\n", fn, res)
+			}
+			return err
+		}
+		if err == nil && res != "" {
+			frameSize = res
+		}
+		return nil
+	}
+	processFrame := func(ch chan error, fn string) {
+		var (
+			err error
+			res string
+		)
+		fnAry := strings.Split(fn, ".")
+		root := fn
+		if len(fnAry) > 1 {
+			root = strings.Join(fnAry[:len(fnAry)-1], ".")
+		}
+		jfn := root + ".jpeg"
+		defer func() {
+			if !gKeep {
+				_ = os.Remove(fn)
+				_ = os.Remove(jfn)
+			}
+			ch <- err
+		}()
+		// fmt.Printf("processing frame: '%s'\n", fn)
+		// convert "${f}" \( -clone 0 -resize 1x1! -resize $size! -modulate 100,100,0 \) \( -clone 0 -fill "gray(50%)" -colorize 100 \) -compose colorize -composite -quality "${IJQUAL}" "${jf}"
+		res, err = execCommand(
+			gDebug,
+			gOutput,
+			[]string{
+				"convert", fn, "(", "-clone", "0", "-resize", "1x1!", "-resize", frameSize + "!", "-modulate", "100,100,0", ")",
+				"(", "-clone", "0", "-fill", "gray(50%)", "-colorize", "100", ")",
+				"-compose", "colorize", "-composite", "-quality", gIJqual, jfn,
+			},
+			nil,
+		)
+		if err != nil && res != "" {
+			fmt.Printf("%s:\n%s\n", fn, res)
+			return
+		}
+	}
+	frame := 1
+	ch = make(chan error)
+	nThreads := 0
+	var exists bool
+	for {
+		ffn := fmt.Sprintf("%s_%06d.png", root, frame)
+		exists, err = fileExists(ffn)
+		if err != nil {
+			return
+		}
+		if !exists {
+			break
+		}
+		if frame == 1 {
+			err = getFrameSize(ffn)
+			if err != nil {
+				return
+			}
+			if frameSize == "" {
+				err = fmt.Errorf("cannot detect frame size")
+				return
+			}
+			fmt.Printf("frame size %s\n", frameSize)
+		}
+		go processFrame(ch, ffn)
+		nThreads++
+		if nThreads == gThrN {
+			err = <-ch
+			nThreads--
+			if err != nil {
+				return
+			}
+		}
+		frame++
+	}
+	for nThreads > 0 {
+		err = <-ch
+		nThreads--
+		if err != nil {
+			return
+		}
+	}
+	frame--
+	fmt.Printf("%s: %d frames\n", fn, frame)
 	return
 }
 
@@ -219,8 +414,27 @@ func main() {
 			gVQ = strconv.Itoa(iVQ)
 		}
 	}
+	if os.Getenv("FPS") != "" {
+		fFPS, _ := strconv.ParseFloat(os.Getenv("FPS"), 64)
+		if fFPS > 0.0 {
+			gFPS = fmt.Sprintf("%.3f", fFPS)
+		}
+	}
+	if os.Getenv("JQUAL") != "" {
+		iJqual, _ := strconv.Atoi(os.Getenv("JQUAL"))
+		if iJqual > 0 {
+			gJqual = strconv.Itoa(iJqual)
+		}
+	}
+	if os.Getenv("IJQUAL") != "" {
+		iIJqual, _ := strconv.Atoi(os.Getenv("IJQUAL"))
+		if iIJqual > 0 {
+			gIJqual = strconv.Itoa(iIJqual)
+		}
+	}
 	gOutput = os.Getenv("OUTPUT") != ""
 	gKeep = os.Getenv("KEEP") != ""
+	gThrN = getThreadsNum()
 	for _, arg := range os.Args[1:] {
 		err := awbmov(arg)
 		if err != nil {
