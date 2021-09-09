@@ -24,7 +24,7 @@ import (
 // [JQUAL=90], default 90
 // [JPEG_NO_DEFAULT=1]
 // [NO_JPEG=1]
-// [NO_CONVERT=1]
+// [NO_CONVERT=1] - it will still use convert for png -> jpeg conversion
 // [WBRSC=white-balance-source.jpg]
 // [ACM=1]
 var (
@@ -268,10 +268,6 @@ func awbmov(fn string) (err error) {
 			}
 		}(ch)
 	}
-	ext := "png"
-	if gNoConvert {
-		ext = "jpeg"
-	}
 	go func(ch chan error) {
 		var (
 			res string
@@ -280,11 +276,11 @@ func awbmov(fn string) (err error) {
 		defer func() {
 			ch <- err
 		}()
-		// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.ext"
+		// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.png"
 		res, err = execCommand(
 			gDebug,
 			gOutput,
-			[]string{"ffmpeg", "-i", fn, "-qmin", "1", "-qmax", gVQ, root + "_%06d." + ext},
+			[]string{"ffmpeg", "-i", fn, "-qmin", "1", "-qmax", gVQ, root + "_%06d.png"},
 			nil,
 		)
 		if err != nil && res != "" {
@@ -422,7 +418,14 @@ func awbmov(fn string) (err error) {
 			ch <- err
 		}()
 		// printf("processing frame: '%s'\n", fn)
-		if !gNoConvert {
+		if gNoConvert {
+			res, err = execCommand(
+				gDebug,
+				gOutput,
+				[]string{"convert", fn, "-quality", qual, jfn},
+				nil,
+			)
+		} else {
 			var cmdAndArgs []string
 			if cwb {
 				// convert "${f}" -colorspace sRGB \( -clone 0 -fill "$color" -colorize 50% \) -compose colorize -composite -colorspace sRGB -quality "${IJQUAL}" "${jf}"
@@ -460,12 +463,12 @@ func awbmov(fn string) (err error) {
 					nil,
 				)
 			}
-			if err != nil {
-				if res != "" {
-					printf("%s:\n%s\n", fn, res)
-				}
-				return
+		}
+		if err != nil {
+			if res != "" {
+				printf("%s:\n%s\n", fn, res)
 			}
+			return
 		}
 		if gNoJpeg {
 			return
@@ -513,7 +516,7 @@ func awbmov(fn string) (err error) {
 	ch = make(chan error)
 	nThreads := 0
 	for {
-		ffn := fmt.Sprintf("%s_%06d.%s", root, frame, ext)
+		ffn := fmt.Sprintf("%s_%06d.png", root, frame)
 		exists, err = fileExists(ffn)
 		if err != nil {
 			return
