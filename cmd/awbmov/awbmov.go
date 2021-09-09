@@ -24,7 +24,9 @@ import (
 // [JQUAL=90], default 90
 // [JPEG_NO_DEFAULT=1]
 // [NO_JPEG=1]
+// [NO_CONVERT=1]
 // [WBRSC=white-balance-source.jpg]
+// [ACM=1]
 var (
 	gThrN              int
 	gDebug             int
@@ -32,6 +34,7 @@ var (
 	gKeep              bool
 	gJpegNoDefault     bool
 	gNoJpeg            bool
+	gNoConvert         bool
 	gFPS               string
 	gVQ                = "20"
 	gJqual             = "90"
@@ -273,11 +276,15 @@ func awbmov(fn string) (err error) {
 		defer func() {
 			ch <- err
 		}()
+    ext := "png"
+    if gNoConvert {
+      ext = "jpeg"
+    }
 		// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.png"
 		res, err = execCommand(
 			gDebug,
 			gOutput,
-			[]string{"ffmpeg", "-i", fn, "-qmin", "1", "-qmax", gVQ, root + "_%06d.png"},
+			[]string{"ffmpeg", "-i", fn, "-qmin", "1", "-qmax", gVQ, root + "_%06d." + ext},
 			nil,
 		)
 		if err != nil && res != "" {
@@ -595,7 +602,16 @@ func main() {
 	gKeep = os.Getenv("KEEP") != ""
 	gJpegNoDefault = os.Getenv("JPEG_NO_DEFAULT") != ""
 	gNoJpeg = os.Getenv("NO_JPEG") != ""
+	gNoConvert = os.Getenv("NO_CONVERT") != ""
 	gWBSrc = os.Getenv("WBSRC")
+	if gNoJpeg && gNoConvert {
+		fmt.Printf("error: you cannot skip convert & jpeg tools at the same time\n")
+		return
+	}
+	if gNoConvert && gWBSrc != "" {
+		fmt.Printf("error: you can only use WBSRC with convert tool enabled\n")
+		return
+	}
 	gThrN = getThreadsNum()
 	for _, arg := range os.Args[1:] {
 		dtStart := time.Now()
