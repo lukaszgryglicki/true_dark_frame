@@ -23,6 +23,7 @@ import (
 // [IJQUAL=99], default 99
 // [JQUAL=90], default 90
 // [JPEG_NO_DEFAULT=1]
+// [NO_JPEG=1]
 // [WBRSC=white-balance-source.jpg]
 var (
 	gThrN              int
@@ -30,6 +31,7 @@ var (
 	gOutput            bool
 	gKeep              bool
 	gJpegNoDefault     bool
+	gNoJpeg            bool
 	gFPS               string
 	gVQ                = "20"
 	gJqual             = "90"
@@ -378,11 +380,13 @@ func awbmov(fn string) (err error) {
 		return nil
 	}
 	var jpegEnvMap map[string]string
-	if gJpegNoDefault {
-		jpegEnvMap = map[string]string{"Q": gJqual}
-	} else {
-		jpegEnvMap = gDefaultJpegEnvMap
-		jpegEnvMap["Q"] = gJqual
+	if !gNoJpeg {
+		if gJpegNoDefault {
+			jpegEnvMap = map[string]string{"Q": gJqual}
+		} else {
+			jpegEnvMap = gDefaultJpegEnvMap
+			jpegEnvMap["Q"] = gJqual
+		}
 	}
 	processFrame := func(ch chan error, fn string) {
 		var (
@@ -395,35 +399,53 @@ func awbmov(fn string) (err error) {
 			root = strings.Join(fnAry[:len(fnAry)-1], ".")
 		}
 		jfn := root + ".jpeg"
+		qual := gIJqual
+		if gNoJpeg {
+			jfn = "co_" + jfn
+			qual = gJqual
+		}
 		defer func() {
 			if !gKeep {
 				_ = os.Remove(fn)
-				_ = os.Remove(jfn)
+				if !gNoJpeg {
+					_ = os.Remove(jfn)
+				}
 			}
 			ch <- err
 		}()
 		// printf("processing frame: '%s'\n", fn)
+		var cmdAndArgs []string
 		if cwb {
 			// convert "${f}" -colorspace sRGB \( -clone 0 -fill "$color" -colorize 50% \) -compose colorize -composite -colorspace sRGB -quality "${IJQUAL}" "${jf}"
+			cmdAndArgs = []string{
+				"convert", fn, "-colorspace", "sRGB", "(", "-clone", "0", "-fill", wbColor, "-colorize", "50%", ")",
+				"-compose", "colorize", "-composite", "-colorspace", "sRGB", "-quality", qual,
+			}
+			if gNoJpeg {
+				cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
+			}
+			cmdAndArgs = append(cmdAndArgs, jfn)
 			res, err = execCommand(
 				gDebug,
 				gOutput,
-				[]string{
-					"convert", fn, "-colorspace", "sRGB", "(", "-clone", "0", "-fill", wbColor, "-colorize", "50%", ")",
-					"-compose", "colorize", "-composite", "-colorspace", "sRGB", "-quality", gIJqual, jfn,
-				},
+				cmdAndArgs,
 				nil,
 			)
 		} else {
 			// convert "${f}" \( -clone 0 -resize 1x1! -resize $size! -modulate 100,100,0 \) \( -clone 0 -fill "gray(50%)" -colorize 100 \) -compose colorize -composite -quality "${IJQUAL}" "${jf}"
+			cmdAndArgs = []string{
+				"convert", fn, "(", "-clone", "0", "-resize", "1x1!", "-resize", frameSize + "!", "-modulate", "100,100,0", ")",
+				"(", "-clone", "0", "-fill", "gray(50%)", "-colorize", "100", ")",
+				"-compose", "colorize", "-composite", "-quality", qual,
+			}
+			if gNoJpeg {
+				cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
+			}
+			cmdAndArgs = append(cmdAndArgs, jfn)
 			res, err = execCommand(
 				gDebug,
 				gOutput,
-				[]string{
-					"convert", fn, "(", "-clone", "0", "-resize", "1x1!", "-resize", frameSize + "!", "-modulate", "100,100,0", ")",
-					"(", "-clone", "0", "-fill", "gray(50%)", "-colorize", "100", ")",
-					"-compose", "colorize", "-composite", "-quality", gIJqual, jfn,
-				},
+				cmdAndArgs,
 				nil,
 			)
 		}
@@ -431,6 +453,9 @@ func awbmov(fn string) (err error) {
 			if res != "" {
 				printf("%s:\n%s\n", fn, res)
 			}
+			return
+		}
+		if gNoJpeg {
 			return
 		}
 		// Q="${JQUAL}" jpeg.sh "${jf}"
@@ -567,6 +592,7 @@ func main() {
 	gOutput = os.Getenv("OUTPUT") != ""
 	gKeep = os.Getenv("KEEP") != ""
 	gJpegNoDefault = os.Getenv("JPEG_NO_DEFAULT") != ""
+	gNoJpeg = os.Getenv("NO_JPEG") != ""
 	gWBSrc = os.Getenv("WBSRC")
 	gThrN = getThreadsNum()
 	for _, arg := range os.Args[1:] {
