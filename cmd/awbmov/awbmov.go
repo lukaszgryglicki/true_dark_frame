@@ -22,15 +22,35 @@ import (
 // [N_CPUS=16], default autodetect
 // [IJQUAL=99], default 99
 // [JQUAL=90], default 90
+// [JPEG_NO_DEFAULT=1]
 var (
-	gThrN   int
-	gDebug  int
-	gOutput bool
-	gKeep   bool
-	gFPS    string
-	gVQ     = "20"
-	gJqual  = "90"
-	gIJqual = "99"
+	gThrN              int
+	gDebug             int
+	gOutput            bool
+	gKeep              bool
+	gJpegNoDefault     bool
+	gFPS               string
+	gVQ                = "20"
+	gJqual             = "90"
+	gIJqual            = "99"
+	gDefaultJpegEnvMap = map[string]string{
+		"RR":  "1",
+		"RG":  "0",
+		"RB":  "0",
+		"GR":  "0",
+		"GG":  "1",
+		"GB":  "0",
+		"BR":  "0",
+		"BG":  "0",
+		"BB":  "1",
+		"RLO": ".3",
+		"RHI": ".3",
+		"GLO": ".3",
+		"GHI": ".3",
+		"BLO": ".3",
+		"BHI": ".3",
+		"NA":  "1",
+	}
 )
 
 func getThreadsNum() (thrN int) {
@@ -241,7 +261,7 @@ func awbmov(fn string) (err error) {
 		defer func() {
 			ch <- err
 		}()
-		// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.png" || exit 1
+		// ffmpeg -i "$1" -qmin 1 -qmax "${VQ}" "${root}_%06d.png"
 		res, err = execCommand(
 			gDebug,
 			gOutput,
@@ -260,7 +280,7 @@ func awbmov(fn string) (err error) {
 		defer func() {
 			ch <- err
 		}()
-		// ffmpeg -i "$1" -vn -acodec aac -ac 2 -ar 48000 -f mp4 -y "${root}.aac" || exit 2
+		// ffmpeg -i "$1" -vn -acodec aac -ac 2 -ar 48000 -f mp4 -y "${root}.aac"
 		res, err = execCommand(
 			gDebug,
 			gOutput,
@@ -322,6 +342,13 @@ func awbmov(fn string) (err error) {
 		}
 		return nil
 	}
+	var jpegEnvMap map[string]string
+	if gJpegNoDefault {
+		jpegEnvMap = map[string]string{"Q": gJqual}
+	} else {
+		jpegEnvMap = gDefaultJpegEnvMap
+		jpegEnvMap["Q"] = gJqual
+	}
 	processFrame := func(ch chan error, fn string) {
 		var (
 			err error
@@ -352,9 +379,21 @@ func awbmov(fn string) (err error) {
 			},
 			nil,
 		)
+		if err != nil {
+			if res != "" {
+				fmt.Printf("%s:\n%s\n", fn, res)
+			}
+			return
+		}
+		// Q="${JQUAL}" jpeg.sh "${jf}"
+		res, err = execCommand(
+			gDebug,
+			gOutput,
+			[]string{"jpeg", jfn},
+			jpegEnvMap,
+		)
 		if err != nil && res != "" {
 			fmt.Printf("%s:\n%s\n", fn, res)
-			return
 		}
 	}
 	frame := 1
@@ -401,6 +440,39 @@ func awbmov(fn string) (err error) {
 	}
 	frame--
 	fmt.Printf("%s: %d frames\n", fn, frame)
+	//ffmpeg -framerate "${FPS}" -i "co_${root}_%06d.jpeg" -r "${FPS}" -i "${root}.aac" -s "${size}" -vcodec h264 -mbd 2 -preset slower -crf "${VQ}" -shortest -y "${root}.mp4"
+	var res string
+	res, err = execCommand(
+		gDebug,
+		gOutput,
+		[]string{
+			"ffmpeg", "-framerate", gFPS, "-i", "co_" + root + "_%06d.jpeg", "-r", gFPS, "-i", root + ".aac",
+			"-s", frameSize, "-vcodec", "h264", "-mbd", "2", "-preset", "slower", "-crf", gVQ, "-shortest", "-y", root + ".mp4",
+		},
+		nil,
+	)
+	if err != nil {
+		if res != "" {
+			fmt.Printf("%s:\n%s\n", fn, res)
+		}
+		return
+	}
+	// drop AAC and co_*.jpeg
+	var e error
+	if !gKeep {
+		frame = 1
+		_ = os.Remove(root + ".aac")
+		for {
+			ffn := fmt.Sprintf("co_%s_%06d.jpeg", root, frame)
+			exists, e = fileExists(ffn)
+			if e != nil && !exists {
+				break
+			}
+			_ = os.Remove(ffn)
+			frame++
+		}
+	}
+	fmt.Printf("%s.mp4 saved\n", root)
 	return
 }
 
@@ -434,11 +506,17 @@ func main() {
 	}
 	gOutput = os.Getenv("OUTPUT") != ""
 	gKeep = os.Getenv("KEEP") != ""
+	gJpegNoDefault = os.Getenv("JPEG_NO_DEFAULT") != ""
 	gThrN = getThreadsNum()
 	for _, arg := range os.Args[1:] {
+		dtStart := time.Now()
 		err := awbmov(arg)
+		dtEnd := time.Now()
+		elapsed := dtEnd.Sub(dtStart)
 		if err != nil {
-			fmt.Printf("'%s': error: %+v\n", arg, err)
+			fmt.Printf("'%s': error: %+v (took %v)\n", arg, err, elapsed)
+			continue
 		}
+		fmt.Printf("'%s': ok, took %v\n", arg, elapsed)
 	}
 }
