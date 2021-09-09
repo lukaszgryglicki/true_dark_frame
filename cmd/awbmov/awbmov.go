@@ -517,6 +517,6 @@ func main() {
 			fmt.Printf("'%s': error: %+v (took %v)\n", arg, err, elapsed)
 			continue
 		}
-		fmt.Printf("'%s': ok, took %v\n", arg, elapsed)
+		fmt.Printf("%s: ok, took %v\n", arg, elapsed)
 	}
 }
