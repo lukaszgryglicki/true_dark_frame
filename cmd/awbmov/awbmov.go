@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -336,6 +335,7 @@ func awbmov(fn string) (err error) {
 			return true, nil
 		}
 		if errors.Is(err, os.ErrNotExist) {
+			// if strings.Contains(err.Error(), "no such file or directory") {
 			return false, nil
 		}
 		return false, err
