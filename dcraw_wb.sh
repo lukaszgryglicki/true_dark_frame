@@ -16,6 +16,7 @@ then
 else
   convert "$tiff" "$png" || exit 3
   color=`convert "${WBSRC}" -resize 1x1! -modulate 100,100,0 -format "%[pixel:u.p{0,0}]" info:`
+  echo "WBSRC color $color"
   convert "$png" -colorspace sRGB \( -clone 0 -fill "$color" -colorize 50% \) -compose colorize -composite -colorspace sRGB -quality 98% "$jpeg" || exit 4
 fi
 RR=1 RG=0 RB=0 GR=0 GG=1 GB=0 BR=0 BG=0 BB=1 RLO=.2 RHI=.2 GLO=.2 GHI=.2 BLO=.2 BHI=.2 NA=1 Q=95 jpeg "$jpeg" || exit 5
