@@ -1,4 +1,5 @@
 #!/bin/bash
+# WBRSC=white-balance-source.jpg
 IJQUAL=99
 if [ -z "${WBSRC}" ]
 then

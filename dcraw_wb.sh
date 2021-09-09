@@ -1,4 +1,5 @@
 #!/bin/bash
+# WBRSC=white-balance-source.jpg
 tiff=`echo $1 | cut -f 1 -d .`.tiff
 jpeg=`echo $1 | cut -f 1 -d .`.jpeg
 png=`echo $1 | cut -f 1 -d .`.png
