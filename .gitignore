@@ -57,4 +57,7 @@ dkms.conf
 *.aac
 *.swp
 *.jpeg
+*.jpg
+*.JPEG
+*.JPG
 /awbmov

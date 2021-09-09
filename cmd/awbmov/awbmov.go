@@ -23,6 +23,7 @@ import (
 // [IJQUAL=99], default 99
 // [JQUAL=90], default 90
 // [JPEG_NO_DEFAULT=1]
+// [WBRSC=white-balance-source.jpg]
 var (
 	gThrN              int
 	gDebug             int
@@ -33,6 +34,7 @@ var (
 	gVQ                = "20"
 	gJqual             = "90"
 	gIJqual            = "99"
+	gWBSrc             string
 	gDefaultJpegEnvMap = map[string]string{
 		"RR":  "1",
 		"RG":  "0",
@@ -52,6 +54,14 @@ var (
 		"NA":  "1",
 	}
 )
+
+func toYMDHMSMi(dt time.Time) string {
+	return fmt.Sprintf("%04d-%02d-%02d %02d:%02d:%02d.%03d", dt.Year(), dt.Month(), dt.Day(), dt.Hour(), dt.Minute(), dt.Second(), dt.Nanosecond()/1000000)
+}
+
+func printf(format string, args ...interface{}) (n int, err error) {
+	return fmt.Printf("%s: "+format, append([]interface{}{toYMDHMSMi(time.Now())}, args...)...)
+}
 
 func getThreadsNum() (thrN int) {
 	nCPUsStr := os.Getenv("N_CPUS")
@@ -99,7 +109,7 @@ func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]str
 				args = append(args, arg)
 			}
 		}
-		fmt.Printf("%s\n", strings.Join(args, " "))
+		printf("%s\n", strings.Join(args, " "))
 	}
 	cmd := exec.Command(command, arguments...)
 
@@ -111,9 +121,9 @@ func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]str
 		}
 		cmd.Env = newEnv
 		if debug > 0 {
-			fmt.Printf("Environment Override: %+v\n", env)
+			printf("Environment Override: %+v\n", env)
 			if debug > 2 {
-				fmt.Printf("Full Environment: %+v\n", newEnv)
+				printf("Full Environment: %+v\n", newEnv)
 			}
 		}
 	}
@@ -146,7 +156,7 @@ func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]str
 		buffer := make([]byte, pipeSize, pipeSize)
 		nBytes, e := stdOutPipe.Read(buffer)
 		for e == nil && nBytes > 0 {
-			fmt.Printf("%s", buffer[:nBytes])
+			printf("%s", buffer[:nBytes])
 			outputStr += string(buffer[:nBytes])
 			nBytes, e = stdOutPipe.Read(buffer)
 		}
@@ -167,12 +177,12 @@ func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]str
 		if debug <= 1 {
 			outStr := stdOut.String()
 			if len(outStr) > 0 {
-				fmt.Printf("%v\n", outStr)
+				printf("%v\n", outStr)
 			}
 		}
 		errStr := stdErr.String()
 		if len(errStr) > 0 {
-			fmt.Printf("STDERR:\n%v\n", errStr)
+			printf("STDERR:\n%v\n", errStr)
 		}
 		if err != nil {
 			return stdOut.String(), err
@@ -183,7 +193,7 @@ func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]str
 	if debug > 1 {
 		errStr := stdErr.String()
 		if len(errStr) > 0 {
-			fmt.Printf("Errors:\n%v\n", errStr)
+			printf("Errors:\n%v\n", errStr)
 		}
 	}
 	if debug > 0 {
@@ -193,7 +203,7 @@ func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]str
 			info = info[0:0x140] + "..." + info[lenInfo-0x140:lenInfo]
 		}
 		dtEnd := time.Now()
-		fmt.Printf("%s: %+v\n", info, dtEnd.Sub(dtStart))
+		printf("%s: %+v\n", info, dtEnd.Sub(dtStart))
 	}
 	outStr := ""
 	if output {
@@ -207,7 +217,7 @@ func execCommand(debug int, output bool, cmdAndArgs []string, env map[string]str
 }
 
 func awbmov(fn string) (err error) {
-	fmt.Printf("processing '%s'\n", fn)
+	printf("processing '%s'\n", fn)
 	fnAry := strings.Split(fn, ".")
 	root := fn
 	if len(fnAry) > 1 {
@@ -234,7 +244,7 @@ func awbmov(fn string) (err error) {
 				nil,
 			)
 			if err != nil && res != "" {
-				fmt.Printf("%s:\n%s\n", fn, res)
+				printf("%s:\n%s\n", fn, res)
 			}
 			if err == nil && res != "" {
 				var (
@@ -269,7 +279,7 @@ func awbmov(fn string) (err error) {
 			nil,
 		)
 		if err != nil && res != "" {
-			fmt.Printf("%s:\n%s\n", fn, res)
+			printf("%s:\n%s\n", fn, res)
 		}
 	}(ch)
 	go func(ch chan error) {
@@ -288,7 +298,7 @@ func awbmov(fn string) (err error) {
 			nil,
 		)
 		if err != nil && res != "" {
-			fmt.Printf("%s:\n%s\n", fn, res)
+			printf("%s:\n%s\n", fn, res)
 		}
 	}(ch)
 	err = <-ch
@@ -309,9 +319,9 @@ func awbmov(fn string) (err error) {
 		err = fmt.Errorf("no fps specified and autodetect failed, please specify fps via FPS=29.97")
 		return
 	}
-	fmt.Printf("using %s fps, %d threads\n", gFPS, gThrN)
+	printf("using %s fps, %d threads\n", gFPS, gThrN)
 	fileExists := func(name string) (bool, error) {
-		// fmt.Printf("check '%s'\n", name)
+		// printf("check '%s'\n", name)
 		_, err := os.Stat(name)
 		if err == nil {
 			return true, nil
@@ -321,7 +331,32 @@ func awbmov(fn string) (err error) {
 		}
 		return false, err
 	}
-	var frameSize string
+	var (
+		frameSize string
+		wbColor   string
+		cwb       bool
+	)
+	getWBColor := func() error {
+		var res string
+		// color=`convert "${WBSRC}" -resize 1x1! -modulate 100,100,0 -format "%[pixel:u.p{0,0}]" info:`
+		res, err = execCommand(
+			gDebug,
+			true,
+			[]string{"convert", gWBSrc, "-resize", "1x1!", "-modulate", "100,100,0", "-format", "%[pixel:u.p{0,0}]", "info:"},
+			nil,
+		)
+		if err != nil {
+			if res != "" {
+				printf("%s:\n%s\n", fn, res)
+			}
+			return err
+		}
+		if err == nil && res != "" {
+			wbColor = res
+			cwb = true
+		}
+		return nil
+	}
 	getFrameSize := func(fn string) error {
 		var res string
 		// size=`convert "$f" -format "%wx%h" info:`
@@ -333,7 +368,7 @@ func awbmov(fn string) (err error) {
 		)
 		if err != nil {
 			if res != "" {
-				fmt.Printf("%s:\n%s\n", fn, res)
+				printf("%s:\n%s\n", fn, res)
 			}
 			return err
 		}
@@ -367,21 +402,34 @@ func awbmov(fn string) (err error) {
 			}
 			ch <- err
 		}()
-		// fmt.Printf("processing frame: '%s'\n", fn)
-		// convert "${f}" \( -clone 0 -resize 1x1! -resize $size! -modulate 100,100,0 \) \( -clone 0 -fill "gray(50%)" -colorize 100 \) -compose colorize -composite -quality "${IJQUAL}" "${jf}"
-		res, err = execCommand(
-			gDebug,
-			gOutput,
-			[]string{
-				"convert", fn, "(", "-clone", "0", "-resize", "1x1!", "-resize", frameSize + "!", "-modulate", "100,100,0", ")",
-				"(", "-clone", "0", "-fill", "gray(50%)", "-colorize", "100", ")",
-				"-compose", "colorize", "-composite", "-quality", gIJqual, jfn,
-			},
-			nil,
-		)
+		// printf("processing frame: '%s'\n", fn)
+		if cwb {
+			// convert "${f}" -colorspace sRGB \( -clone 0 -fill "$color" -colorize 50% \) -compose colorize -composite -colorspace sRGB -quality "${IJQUAL}" "${jf}"
+			res, err = execCommand(
+				gDebug,
+				gOutput,
+				[]string{
+					"convert", fn, "-colorspace", "sRGB", "(", "-clone", "0", "-fill", wbColor, "-colorize", "50%", ")",
+					"-compose", "colorize", "-composite", "-colorspace", "sRGB", "-quality", gIJqual, jfn,
+				},
+				nil,
+			)
+		} else {
+			// convert "${f}" \( -clone 0 -resize 1x1! -resize $size! -modulate 100,100,0 \) \( -clone 0 -fill "gray(50%)" -colorize 100 \) -compose colorize -composite -quality "${IJQUAL}" "${jf}"
+			res, err = execCommand(
+				gDebug,
+				gOutput,
+				[]string{
+					"convert", fn, "(", "-clone", "0", "-resize", "1x1!", "-resize", frameSize + "!", "-modulate", "100,100,0", ")",
+					"(", "-clone", "0", "-fill", "gray(50%)", "-colorize", "100", ")",
+					"-compose", "colorize", "-composite", "-quality", gIJqual, jfn,
+				},
+				nil,
+			)
+		}
 		if err != nil {
 			if res != "" {
-				fmt.Printf("%s:\n%s\n", fn, res)
+				printf("%s:\n%s\n", fn, res)
 			}
 			return
 		}
@@ -393,13 +441,40 @@ func awbmov(fn string) (err error) {
 			jpegEnvMap,
 		)
 		if err != nil && res != "" {
-			fmt.Printf("%s:\n%s\n", fn, res)
+			printf("%s:\n%s\n", fn, res)
 		}
+	}
+	if gWBSrc != "" {
+		err = getWBColor()
+		if err != nil {
+			return
+		}
+		if wbColor == "" {
+			err = fmt.Errorf("cannot detect WBSRC color")
+			return
+		}
+		printf("WBSRC color %s\n", wbColor)
+	}
+	// drop AAC and co_*.jpeg
+	var exists bool
+	if !gKeep {
+		defer func() {
+			_ = os.Remove(root + ".aac")
+			dFrame := 1
+			for {
+				ffn := fmt.Sprintf("co_%s_%06d.jpeg", root, dFrame)
+				exists, e := fileExists(ffn)
+				if e != nil || !exists {
+					break
+				}
+				_ = os.Remove(ffn)
+				dFrame++
+			}
+		}()
 	}
 	frame := 1
 	ch = make(chan error)
 	nThreads := 0
-	var exists bool
 	for {
 		ffn := fmt.Sprintf("%s_%06d.png", root, frame)
 		exists, err = fileExists(ffn)
@@ -418,7 +493,7 @@ func awbmov(fn string) (err error) {
 				err = fmt.Errorf("cannot detect frame size")
 				return
 			}
-			fmt.Printf("frame size %s\n", frameSize)
+			printf("frame size %s\n", frameSize)
 		}
 		go processFrame(ch, ffn)
 		nThreads++
@@ -439,7 +514,7 @@ func awbmov(fn string) (err error) {
 		}
 	}
 	frame--
-	fmt.Printf("%s: %d frames\n", fn, frame)
+	printf("%s: %d frames\n", fn, frame)
 	//ffmpeg -framerate "${FPS}" -i "co_${root}_%06d.jpeg" -r "${FPS}" -i "${root}.aac" -s "${size}" -vcodec h264 -mbd 2 -preset slower -crf "${VQ}" -shortest -y "${root}.mp4"
 	var res string
 	res, err = execCommand(
@@ -453,26 +528,11 @@ func awbmov(fn string) (err error) {
 	)
 	if err != nil {
 		if res != "" {
-			fmt.Printf("%s:\n%s\n", fn, res)
+			printf("%s:\n%s\n", fn, res)
 		}
 		return
 	}
-	// drop AAC and co_*.jpeg
-	var e error
-	if !gKeep {
-		_ = os.Remove(root + ".aac")
-		frame = 1
-		for {
-			ffn := fmt.Sprintf("co_%s_%06d.jpeg", root, frame)
-			exists, e = fileExists(ffn)
-			if e != nil || !exists {
-				break
-			}
-			_ = os.Remove(ffn)
-			frame++
-		}
-	}
-	fmt.Printf("%s.mp4 saved\n", root)
+	printf("%s.mp4 saved\n", root)
 	return
 }
 
@@ -507,6 +567,7 @@ func main() {
 	gOutput = os.Getenv("OUTPUT") != ""
 	gKeep = os.Getenv("KEEP") != ""
 	gJpegNoDefault = os.Getenv("JPEG_NO_DEFAULT") != ""
+	gWBSrc = os.Getenv("WBSRC")
 	gThrN = getThreadsNum()
 	for _, arg := range os.Args[1:] {
 		dtStart := time.Now()
@@ -514,9 +575,9 @@ func main() {
 		dtEnd := time.Now()
 		elapsed := dtEnd.Sub(dtStart)
 		if err != nil {
-			fmt.Printf("'%s': error: %+v (took %v)\n", arg, err, elapsed)
+			printf("'%s': error: %+v (took %v)\n", arg, err, elapsed)
 			continue
 		}
-		fmt.Printf("%s: ok, took %v\n", arg, elapsed)
+		printf("%s: ok, took %v\n", arg, elapsed)
 	}
 }
