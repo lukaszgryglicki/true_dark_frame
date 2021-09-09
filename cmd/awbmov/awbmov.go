@@ -422,7 +422,8 @@ func awbmov(fn string) (err error) {
 				"-compose", "colorize", "-composite", "-colorspace", "sRGB", "-quality", qual,
 			}
 			if gNoJpeg {
-				cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
+				// cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
+				cmdAndArgs = append(cmdAndArgs, "-normalize")
 			}
 			cmdAndArgs = append(cmdAndArgs, jfn)
 			res, err = execCommand(
@@ -439,7 +440,8 @@ func awbmov(fn string) (err error) {
 				"-compose", "colorize", "-composite", "-quality", qual,
 			}
 			if gNoJpeg {
-				cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
+				// cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
+				cmdAndArgs = append(cmdAndArgs, "-normalize")
 			}
 			cmdAndArgs = append(cmdAndArgs, jfn)
 			res, err = execCommand(
