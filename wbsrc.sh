@@ -12,10 +12,10 @@ then
     echo "$0: you need to specify WB source via WB=filename.NEF or specify multipliers via MULT='R B B G'"
     exit 1
   fi
-  inf=`echo "${WB}" | cut -f 1 -d .`.inf
+  inf="${WB/.NEF/.inf}"
   if [ ! -f "${inf}" ]
   then
-    ppm=`echo "${WB}" | cut -f 1 -d .`.ppm
+    ppm="${WB/.NEF/.ppm}"
     echo "generating white balance info: ${inf}"
     dcraw -v -H 1 -W -a "${WB}" 2> "${inf}" || exit 2
     rm -rf "${ppm}"
@@ -31,14 +31,19 @@ fi
 echo "using RGRB multipliers: ${MULT}, dcraw args: ${DCARGS}"
 for f in "$@"
 do
+  if [[ $f != *.NEF ]]
+  then
+    echo "$0: ${f} is not a NEF file, skipping"
+    continue
+  fi
   if [ "${f}" = "${WB}" ]
   then
     echo "$0: skipping white balance source file: ${WB}"
     continue
   fi
   echo "processing ${f}"
-  tiff=`echo "${f}" | cut -f 1 -d .`.tiff
-  jpeg=`echo "${f}" | cut -f 1 -d .`.jpeg
+  tiff="${f/.NEF/.tiff}"
+  jpeg="${f/.NEF/.jpeg}"
   dcraw ${DCARGS} -r ${MULT} -T "${f}" || exit 3
   if [ -z "${NOLG}" ]
   then
