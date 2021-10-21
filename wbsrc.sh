@@ -9,7 +9,7 @@ if [ -z "${MULT}" ]
 then
   if [ -z "${WB}" ]
   then
-    echo "$0: you need to specify WB source via WB=filename.NEF or specify multipliers via MULT='R B B G'"
+    echo "$0: you need to specify WB source via WB=filename.NEF or specify multipliers via MULT='R G B G'"
     exit 1
   fi
   inf="${WB/.NEF/.inf}"
