@@ -24,6 +24,7 @@ import (
 // [JQUAL=90], default 90
 // [JPEG_NO_DEFAULT=1]
 // [NO_JPEG=1]
+// [NO_NORMALIZE=1]
 // [NO_CONVERT=1] - it will still use convert for png -> jpeg conversion
 // [WBRSC=white-balance-source.jpg]
 // [ACM=1]
@@ -34,6 +35,7 @@ var (
 	gKeep              bool
 	gJpegNoDefault     bool
 	gNoJpeg            bool
+	gNoNorm            bool
 	gNoConvert         bool
 	gFPS               string
 	gVQ                = "20"
@@ -332,7 +334,7 @@ func awbmov(fn string) (err error) {
 			return true, nil
 		}
 		if errors.Is(err, os.ErrNotExist) {
-			// if strings.Contains(err.Error(), "no such file or directory") {
+			//if strings.Contains(err.Error(), "no such file or directory") {
 			return false, nil
 		}
 		return false, err
@@ -433,7 +435,7 @@ func awbmov(fn string) (err error) {
 					"convert", fn, "-colorspace", "sRGB", "(", "-clone", "0", "-fill", wbColor, "-colorize", "50%", ")",
 					"-compose", "colorize", "-composite", "-colorspace", "sRGB", "-quality", qual,
 				}
-				if gNoJpeg {
+				if gNoJpeg && !gNoNorm {
 					// cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
 					cmdAndArgs = append(cmdAndArgs, "-normalize")
 				}
@@ -451,7 +453,7 @@ func awbmov(fn string) (err error) {
 					"(", "-clone", "0", "-fill", "gray(50%)", "-colorize", "100", ")",
 					"-compose", "colorize", "-composite", "-quality", qual,
 				}
-				if gNoJpeg {
+				if gNoJpeg && !gNoNorm {
 					// cmdAndArgs = append(cmdAndArgs, []string{"-auto-gamma", "-auto-level"}...)
 					cmdAndArgs = append(cmdAndArgs, "-normalize")
 				}
@@ -608,6 +610,7 @@ func main() {
 	gKeep = os.Getenv("KEEP") != ""
 	gJpegNoDefault = os.Getenv("JPEG_NO_DEFAULT") != ""
 	gNoJpeg = os.Getenv("NO_JPEG") != ""
+	gNoNorm = os.Getenv("NO_NORMALIZE") != ""
 	gNoConvert = os.Getenv("NO_CONVERT") != ""
 	gWBSrc = os.Getenv("WBSRC")
 	if gNoJpeg && gNoConvert {

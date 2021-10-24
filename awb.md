@@ -10,6 +10,7 @@
 - `JQUAL=90, default 90` - output jpeg quality (frames).
 - `JPEG_NO_DEFAULT=1` - no default jpeg command params, which are: `RR=1 RG=0 RB=0 GR=0 GG=1 GB=0 BR=0 BG=0 BB=1 RLO=.3 RHI=.3 GLO=.3 GHI=.3 BLO=.3 BHI=.3 NA=1`.
 - `NO_JPEG=1` - don't use jpeg tool.
+- `NO_NORMALIZE=1` - don't use convert normalize when using no jpeg.
 - `NO_CONVERT=1` - it will still use convert for png -> jpeg conversion.
 - `WBRSC=white-balance-source.jpg` - use a given file jpeg/png for white balance source
 - `ACM=1` - do not streat all colors independently, stretch while keepingh colors balance (ACM - all colors mode).
